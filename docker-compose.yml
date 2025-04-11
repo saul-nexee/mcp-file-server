@@ -1,0 +1,11 @@
+version: '3'
+
+services:
+  mcp-file-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mcp-file-server
+    volumes:
+      - /Users/abhishekloiwal/CascadeProjects/ClaudeProjects:/data
+    restart: unless-stopped
