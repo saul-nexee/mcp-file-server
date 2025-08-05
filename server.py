@@ -1,124 +1,94 @@
+
 import os
-from pathlib import Path
 import json
-from typing import Dict, Any, List, Optional
+from typing import List
 
 from mcp.server.fastmcp import FastMCP
 
 # Initialize the MCP server
 mcp = FastMCP("file-server")
 
-# Set the base directory where we'll read and write files
-BASE_DIR = "/data"  # This will be mapped to your local directory in Docker
+# Base directory
+BASE_DIR = os.path.normpath("D:\\Git\\Nexee")
+
+def _resolve_path(user_path: str) -> str:
+    """Resolve and validate a user-supplied path relative to BASE_DIR."""
+    target = os.path.normpath(os.path.join(BASE_DIR, user_path))
+    if not target.startswith(BASE_DIR):
+        raise ValueError(f"Access denied: '{user_path}' resolves outside of base directory.")
+    return target
 
 @mcp.tool()
 async def list_files(path: str = "") -> str:
-    """List all files in the specified directory.
-    
-    Args:
-        path: Optional subdirectory path relative to the base directory
-    """
-    target_dir = os.path.normpath(os.path.join(BASE_DIR, path))
-    
-    # Security check to prevent directory traversal
-    if not target_dir.startswith(BASE_DIR):
-        return f"Error: Cannot access directories outside of the base directory."
-    
     try:
-        files = os.listdir(target_dir)
-        file_info = []
-        
-        for file in files:
-            full_path = os.path.join(target_dir, file)
-            is_dir = os.path.isdir(full_path)
-            size = os.path.getsize(full_path) if not is_dir else "-"
-            file_type = "Directory" if is_dir else "File"
-            
-            file_info.append({
-                "name": file,
-                "type": file_type,
-                "size": size
+        target_dir = _resolve_path(path)
+        entries = []
+        for name in os.listdir(target_dir):
+            full = os.path.join(target_dir, name)
+            entries.append({
+                "name": name,
+                "type": "Directory" if os.path.isdir(full) else "File",
+                "size": os.path.getsize(full) if os.path.isfile(full) else "-"
             })
-        
-        return json.dumps(file_info, indent=2)
+        return json.dumps(entries, indent=2)
     except Exception as e:
         return f"Error listing files: {str(e)}"
 
 @mcp.tool()
 async def read_file(file_path: str) -> str:
-    """Read the contents of a file.
-    
-    Args:
-        file_path: Path to the file relative to the base directory
-    """
-    target_file = os.path.normpath(os.path.join(BASE_DIR, file_path))
-    
-    # Security check to prevent directory traversal
-    if not target_file.startswith(BASE_DIR):
-        return f"Error: Cannot access files outside of the base directory."
-    
     try:
-        if not os.path.isfile(target_file):
-            return f"Error: File does not exist or is not a file: {file_path}"
-        
-        with open(target_file, 'r') as f:
-            content = f.read()
-        
-        return content
+        file = _resolve_path(file_path)
+        if not os.path.isfile(file):
+            return f"Error: Not a file or doesn't exist: {file_path}"
+        with open(file, 'r') as f:
+            return f.read()
     except Exception as e:
-        return f"Error reading file: {str(e)}"
+        return f"Error reading file '{file_path}': {str(e)}"
 
 @mcp.tool()
 async def write_file(file_path: str, content: str) -> str:
-    """Write content to a file.
-    
-    Args:
-        file_path: Path to the file relative to the base directory
-        content: Content to write to the file
-    """
-    target_file = os.path.normpath(os.path.join(BASE_DIR, file_path))
-    
-    # Security check to prevent directory traversal
-    if not target_file.startswith(BASE_DIR):
-        return f"Error: Cannot access files outside of the base directory."
-    
     try:
-        # Create directory if it doesn't exist
-        os.makedirs(os.path.dirname(target_file), exist_ok=True)
-        
-        with open(target_file, 'w') as f:
+        file = _resolve_path(file_path)
+        os.makedirs(os.path.dirname(file), exist_ok=True)
+        with open(file, 'w') as f:
             f.write(content)
-        
         return f"Successfully wrote to {file_path}"
     except Exception as e:
-        return f"Error writing to file: {str(e)}"
+        return f"Error writing file '{file_path}': {str(e)}"
 
 @mcp.tool()
 async def delete_file(file_path: str) -> str:
-    """Delete a file.
-    
-    Args:
-        file_path: Path to the file relative to the base directory
-    """
-    target_file = os.path.normpath(os.path.join(BASE_DIR, file_path))
-    
-    # Security check to prevent directory traversal
-    if not target_file.startswith(BASE_DIR):
-        return f"Error: Cannot access files outside of the base directory."
-    
     try:
-        if not os.path.exists(target_file):
-            return f"Error: File does not exist: {file_path}"
-        
-        if os.path.isdir(target_file):
-            os.rmdir(target_file)
-            return f"Successfully deleted directory: {file_path}"
+        file = _resolve_path(file_path)
+        if not os.path.exists(file):
+            return f"Error: Path doesn't exist: {file_path}"
+        if os.path.isdir(file):
+            os.rmdir(file)
+            return f"Deleted directory: {file_path}"
         else:
-            os.remove(target_file)
-            return f"Successfully deleted file: {file_path}"
+            os.remove(file)
+            return f"Deleted file: {file_path}"
     except Exception as e:
-        return f"Error deleting file: {str(e)}"
+        return f"Error deleting '{file_path}': {str(e)}"
+
+@mcp.tool()
+async def search_files(keyword: str, path: str = "") -> str:
+    try:
+        target_dir = _resolve_path(path)
+        matches = []
+        for root, _, files in os.walk(target_dir):
+            for name in files:
+                if keyword.lower() in name.lower():
+                    rel = os.path.relpath(os.path.join(root, name), BASE_DIR)
+                    matches.append(rel)
+        return json.dumps(matches, indent=2)
+    except Exception as e:
+        return f"Error searching for '{keyword}': {str(e)}"
+
+@mcp.tool()
+async def allowed_directories() -> List[str]:
+    return [BASE_DIR]
 
 if __name__ == "__main__":
-    # Initialize and run the server with stdio transport
-    mcp.run(transport='stdio')
+    mcp.run(transport="stdio")
+
