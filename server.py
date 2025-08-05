@@ -1,18 +1,17 @@
 
 import os
 import json
+import argparse
 from typing import List
 
 from mcp.server.fastmcp import FastMCP
 
-# Initialize the MCP server
 mcp = FastMCP("file-server")
-
-# Base directory
-BASE_DIR = os.path.normpath("D:\\Git\\Nexee")
+BASE_DIR = None  # Will be set in __main__
 
 def _resolve_path(user_path: str) -> str:
-    """Resolve and validate a user-supplied path relative to BASE_DIR."""
+    if BASE_DIR is None:
+        raise RuntimeError("BASE_DIR is not configured")
     target = os.path.normpath(os.path.join(BASE_DIR, user_path))
     if not target.startswith(BASE_DIR):
         raise ValueError(f"Access denied: '{user_path}' resolves outside of base directory.")
@@ -32,7 +31,7 @@ async def list_files(path: str = "") -> str:
             })
         return json.dumps(entries, indent=2)
     except Exception as e:
-        return f"Error listing files: {str(e)}"
+        return f"Error listing files: {e}"
 
 @mcp.tool()
 async def read_file(file_path: str) -> str:
@@ -43,7 +42,7 @@ async def read_file(file_path: str) -> str:
         with open(file, 'r') as f:
             return f.read()
     except Exception as e:
-        return f"Error reading file '{file_path}': {str(e)}"
+        return f"Error reading file '{file_path}': {e}"
 
 @mcp.tool()
 async def write_file(file_path: str, content: str) -> str:
@@ -54,7 +53,7 @@ async def write_file(file_path: str, content: str) -> str:
             f.write(content)
         return f"Successfully wrote to {file_path}"
     except Exception as e:
-        return f"Error writing file '{file_path}': {str(e)}"
+        return f"Error writing file '{file_path}': {e}"
 
 @mcp.tool()
 async def delete_file(file_path: str) -> str:
@@ -65,11 +64,10 @@ async def delete_file(file_path: str) -> str:
         if os.path.isdir(file):
             os.rmdir(file)
             return f"Deleted directory: {file_path}"
-        else:
-            os.remove(file)
-            return f"Deleted file: {file_path}"
+        os.remove(file)
+        return f"Deleted file: {file_path}"
     except Exception as e:
-        return f"Error deleting '{file_path}': {str(e)}"
+        return f"Error deleting '{file_path}': {e}"
 
 @mcp.tool()
 async def search_files(keyword: str, path: str = "") -> str:
@@ -79,16 +77,23 @@ async def search_files(keyword: str, path: str = "") -> str:
         for root, _, files in os.walk(target_dir):
             for name in files:
                 if keyword.lower() in name.lower():
-                    rel = os.path.relpath(os.path.join(root, name), BASE_DIR)
-                    matches.append(rel)
+                    matches.append(os.path.relpath(os.path.join(root, name), BASE_DIR))
         return json.dumps(matches, indent=2)
     except Exception as e:
-        return f"Error searching for '{keyword}': {str(e)}"
+        return f"Error searching for '{keyword}': {e}"
 
 @mcp.tool()
 async def allowed_directories() -> List[str]:
     return [BASE_DIR]
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Start MCP file server.")
+    parser.add_argument("--base-dir", required=True, help="Base directory for file access")
+    args = parser.parse_args()
+
+    if not os.path.isdir(args.base_dir):
+        raise RuntimeError(f"--base-dir is not a valid directory: {args.base_dir}")
+
+    BASE_DIR = os.path.normpath(args.base_dir)
     mcp.run(transport="stdio")
 
